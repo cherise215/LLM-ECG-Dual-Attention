@@ -17,22 +17,15 @@ from torchmetrics import SignalNoiseRatio
 import torch.nn.functional as F
 import pandas as pd
 import pickle
-
-## add ray 
-
 sys.path.append("./")
 from multi_modal_heart.ECG.ecg_dataset import ECGDataset
-from multi_modal_heart.model.ecg_net import ECGAE, doubleECGNet
-from multi_modal_heart.model.my_ecg_transformer import ECG_transformer
+from multi_modal_heart.model.ecg_net import ECGAE
 from multi_modal_heart.ECG.ecg_utils import plot_multiframe_in_one_figure,arraytodataframe
-from multi_modal_heart.model.custom_loss import cal_dtw_loss, calc_SNR_loss, calc_scale_invariant_SNR_loss
 from multi_modal_heart.model.marcel_ECG_network import ECGMarcelVAE
-from multi_modal_heart.model.ecg_lstm_model import ECGLSTMnet
-from multi_modal_heart.common.scheduler import CosineWarmupScheduler,get_cosine_schedule_with_warmup
+from multi_modal_heart.common.scheduler import get_cosine_schedule_with_warmup
 from multi_modal_heart.model.ecg_net_attention import ECGAttentionAE
 from multi_modal_heart.model.ecg_net import BenchmarkClassifier
 from multi_modal_heart.common.metrics import MyDynamicTimeWarpingScore
-from multi_modal_heart.model.custom_loss import UniformityLoss
 ## this file performs ECG pretraining
 class LitAutoEncoder(pl.LightningModule):
     def __init__(self, network,task_name,input_key_name="input_seq", target_key_name="cleaned_seq", 
@@ -40,6 +33,20 @@ class LitAutoEncoder(pl.LightningModule):
         max_iters=2000,batch_size=128, 
         latent_code_dim = 512,
         lr = 1e-3,args=None,**kwargs):
+        '''
+        this is a pytorch lightning module to support training/validation/testing of an autoencoder
+        network: nn.Module, the network to be trained
+        task_name: str, the name of the task
+        input_key_name: str, the key name of the input in the batch
+        target_key_name: str, the key name of the target in the batch
+        future_key_name: str, the key name of the future in the batch (optional)
+        grad_clip: bool, whether to apply gradient clipping
+        warmup: int, the number of warmup steps
+        max_iters: int, the maximum number of iterations
+        batch_size: int, the batch size
+        latent_code_dim: int, the dimension of the latent code
+        lr: float, the learning rate
+        '''
         super().__init__()
         self.network=network
         self.task_name = task_name
@@ -53,9 +60,9 @@ class LitAutoEncoder(pl.LightningModule):
             assert (args.ECG2Text and args.ECG2RawText)==False, "only one of ECG2Text and ECG2RawText can be enabled"
             ## preload saved patientwise text embedding from local disk
             if args.ECG2Text:
-                pickle_path = "./pretrained_weights/pretraining/PTBXL_LLM_scp_structed_text_embedding.pkl"
+                pickle_path = "./pretrained_weights/text_embeddings/PTBXL_LLM_scp_structed_text_embedding.pkl"
             elif args.ECG2RawText:
-                pickle_path = "./pretrained_weights/pretraining/PTBXL_LLM_raw_text.pkl"
+                pickle_path = "./pretrained_weights/text_embeddings/PTBXL_LLM_raw_text.pkl"
             with open(pickle_path, 'rb') as f:
                 self.patient_embedding_dict = pickle.load(f)
            
@@ -197,8 +204,10 @@ class LitAutoEncoder(pl.LightningModule):
                 cls_loss = torch.nn.BCEWithLogitsLoss()(outputs_before_sigmoid,target)
                 self.log("BCE loss", cls_loss,batch_size=outputs_before_sigmoid.shape[0])
                 loss += cls_loss ## for pretraining
+            return x_hat, loss
+
         else:
-            ## only compute the losses around no-masking region or no-padding region.
+            ## at test time, only compute the losses around no-masking region or no-padding region.
             loss = nn.functional.mse_loss(y*mask, x_hat*mask, reduction="none")
             every_lead_loss = loss.mean(dim=[0,2])
             loss = loss.sum()/mask.sum()
@@ -377,6 +386,7 @@ def cli_main():
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--no_log", action="store_true", default=False)
     ## TEST parameters
+    parser.add_argument("--norm_output", action="store_true", default=False)
     parser.add_argument("--mask_half", action="store_true", default=False)
     parser.add_argument("--warm_up", action="store_true", default=False)
     parser.add_argument("--finetune", action="store_true", default=False)
@@ -413,7 +423,7 @@ def cli_main():
     ## initialize a dataloader
     ## contains ecg raw wave data and the corresponding report information
     data_folder = "./data/ptbxl/"
-    ## data with report information
+    ## data with report information, we select only those reports verified by experts for pretraining
     train_data_statement_path =os.path.join(data_folder,"high_quality_split/Y_train.csv")
     validate_data_statement_path =os.path.join(data_folder,"high_quality_split/Y_validate.csv")
     ## original test loader (incl. artefacted data)
@@ -431,9 +441,10 @@ def cli_main():
         max_seq_len = 1024 ## using 1024 for the 12 lead ECG, padding with 0 
     max_epochs= 300
     data_proc_config={
-                    "if_clean":False,
+                    "if_clean":False, ## if perform signal cleaning first
                     }
     data_aug_config={
+                    ## you can change the config here to add noise augmentation
                     "noise_frequency_list":[0],
                     "noise_amplitude_range":[0.,0.],
                     "powerline_frequency_list":[0,0.],
@@ -443,8 +454,9 @@ def cli_main():
                     "linear_drift_range":[0.,0.],
                     "artifacts_frequency_list":[5],
                     "random_prob":0, ## data augmentation prob
+                    ## we turn on the mask augmentation
                     "if_mask_signal":True, ## change it to True
-                    "mask_whole_lead_prob":0.5,
+                    "mask_whole_lead_prob":0.5, ## mask the whole lead
                     "lead_mask_prob":0.2, ## mask certain parts of the lead
                     "region_mask_prob":0.2,
                     "mask_length_range":[0.08, 0.18],
@@ -454,6 +466,7 @@ def cli_main():
     if args.mask_half:
         data_aug_config["random_drop_half_prob"]=0.5
     if args.use_median_wave: 
+        ## turn off the region mask augmentation if the input is median wave
         data_aug_config["region_mask_prob"]=0
         data_aug_config["random_drop_half_prob"]=0
 

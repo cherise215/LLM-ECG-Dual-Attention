@@ -301,7 +301,7 @@ class ECGDataset(Dataset):
         artifacts_frequency = np.random.choice(artifacts_frequency_list)
         distorted_recording = recording.copy()
         distorted_recording = distort_multi_lead_signals(distorted_recording, self.sampling_rate, noise_frequency=noise_frequency_list, 
-                                                         noise_amplitude=noise_amplitude,powerline_amplitude=powerline_amplitude,
+                                                         noise_amplitude=noise_amplitude,powerline_amplitude=powerline_amplitude, powerline_frequency=powerline_frequency,
                                                          artifacts_amplitude=artifacts_amplitude,artifacts_number=artifacts_number,linear_drift=linear_drift,
                                                          random_prob=random_prob,
                                                          artifacts_frequency=artifacts_frequency)

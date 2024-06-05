@@ -147,3 +147,7 @@ cache/
 train_survival_net/
 toolkits/
 pretrained_weights/
+result/
+log_*/
+data/ptbxl/
+data/ukb/

@@ -11,7 +11,6 @@ import os
 import  random
 import sys
 import numpy as np
-from tqdm import tqdm
 from scipy.stats import zscore
 import pandas as pd
 import torch
@@ -20,39 +19,22 @@ from torch.utils.data import TensorDataset, DataLoader
 import torch.nn.functional as F
 import torch.nn as nn
 from lifelines.utils import concordance_index
-import optunity
-from sklearn.model_selection import KFold,StratifiedKFold,train_test_split,StratifiedShuffleSplit
-import operator as op
-import itertools as it
-from lightning.pytorch.tuner import Tuner
+from sklearn.model_selection import StratifiedKFold,train_test_split
 from torch import Tensor
 
-from pytorch_metric_learning import samplers## tenrin to torch tensor dataset
+
 sys.path.append("./")
-from multi_modal_heart.model.ecg_net_attention import ECGEncoder,ECGAttentionAE
+from multi_modal_heart.model.ecg_net_attention import ECGAttentionAE
 from multi_modal_heart.model.ecg_net import ECGAE
 from multi_modal_heart.model.ecg_net import BenchmarkClassifier
-from lightning.pytorch.callbacks import LearningRateFinder
-from multi_modal_heart.common.scheduler import CosineWarmupScheduler,get_cosine_schedule_with_warmup
+from multi_modal_heart.common.scheduler import get_cosine_schedule_with_warmup
 from multi_modal_heart.ECG.ecg_utils import batch_lead_mask
 from multi_modal_heart.model.marcel_ECG_network import ECGMarcelVAE
 
 ## set os environment CUBLAS_WORKSPACE_CONFIG=:4096:8
 # os.environ['CUBLAS_WORKSPACE_CONFIG'] = ":4096:8"
 
-## define survival loss function here
-def _negative_log_likelihood(E, risk): 
-    '''
-    E: 1 if uncensored, 0 if censored
-    risk: predicted risk
 
-    ''' 
-    hazard_ratio = torch.exp(risk)
-    log_risk = torch.log(torch.cumsum(hazard_ratio,dim=0))
-    uncensored_likelihood = risk - log_risk
-    censored_likelihood = uncensored_likelihood * E
-    neg_likelihood = -torch.sum(censored_likelihood)
-    return neg_likelihood
 
 def cox_loss(theta: Tensor, delta: Tensor, time: Tensor) -> Tensor:
     """
@@ -171,7 +153,7 @@ class StratifiedBatchSampler:
 class LitSurvivalModel(pl.LightningModule):
     def __init__(self,encoder,input_dim,lr=1e-4,alpha = 0.5,
                  wd=1e-2,dropout=0.5,freeze_encoder=False, decoder=None,
-                 max_iters=20000, warm_up=False, add_VAE_loss=False):
+                 max_iters=20000, warm_up=False):
         super().__init__()
     
         self.save_hyperparameters(ignore=["encoder", "decoder","freeze_encoder"])
@@ -181,7 +163,6 @@ class LitSurvivalModel(pl.LightningModule):
         self.freeze_encoder = freeze_encoder
         self.lr_scheduler = None
         self.warm_up=warm_up
-        self.add_VAE_loss = add_VAE_loss
         # self.args = args
         if self.freeze_encoder:
             self.encoder.eval()
@@ -251,16 +232,7 @@ class LitSurvivalModel(pl.LightningModule):
             loss = surv_loss
             self.log(f"{stage}/survival_loss", surv_loss,prog_bar=True)
         ## in case VAE is presented
-        if  self.add_VAE_loss:
-            beta = 1e-4
-            try:
-                log_var = self.encoder.z_log_var
-                mu = self.encoder.z_mu
-                kld_loss = beta*torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
-                loss = loss + kld_loss
-                self.log(f"{stage}/VAE_loss", kld_loss,prog_bar=True)
-            except:
-                Warning('VAE loss is not applied')
+
         
         if "test" in stage:
             # print(stage)
@@ -331,7 +303,7 @@ class LitSurvivalModel(pl.LightningModule):
         super().optimizer_step(*args, **kwargs)
         if self.lr_scheduler is not None: self.lr_scheduler.step()  # Step per iteration
 
-def DL_single_run(x_train,y_train, model_name,latent_code_dim,batch_size,add_VAE_loss=False,logger=None,train_from_scratch=False,freeze_encoder=True, lr=1e-3,alpha =0.5,wd=1e-5,dropout=0.5,max_epochs=50,enable_checkpointing=True,disable_logging=False,warm_up=False,random_seed=42, test_only=False, test_checkpoint_path=None):
+def DL_single_run(x_train,y_train, model_name,checkpoint_path,latent_code_dim,batch_size,logger=None,train_from_scratch=False,freeze_encoder=True, lr=1e-3,alpha =0.5,wd=1e-5,dropout=0.5,max_epochs=50,enable_checkpointing=True,disable_logging=False,warm_up=False,random_seed=42, test_only=False, test_checkpoint_path=None):
     ## split it into train and validation
     x_inner_train, x_val, y_innner_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=random_seed,stratify=y_train[:,0])
     train_dataset = TensorDataset(torch.from_numpy(x_inner_train).float(),torch.from_numpy(np.array(y_innner_train)).float())
@@ -357,7 +329,7 @@ def DL_single_run(x_train,y_train, model_name,latent_code_dim,batch_size,add_VAE
                                 shuffle=False,
                                 drop_last=False)
 
-    encoder, decoder, max_epochs = get_model(model_name, train_from_scratch=train_from_scratch, freeze_encoder=freeze_encoder,time_steps=x_train.shape[-1],latent_code_dim=latent_code_dim)
+    encoder, decoder, max_epochs = get_model(model_name, checkpoint_path,train_from_scratch=train_from_scratch, freeze_encoder=freeze_encoder,time_steps=x_train.shape[-1],latent_code_dim=latent_code_dim)
     max_iters=max_epochs * len(train_dataloader)
     survival_model = LitSurvivalModel(encoder=encoder,
                                       input_dim=latent_code_dim,
@@ -368,7 +340,7 @@ def DL_single_run(x_train,y_train, model_name,latent_code_dim,batch_size,add_VAE
                                       dropout = dropout,
                                       freeze_encoder=freeze_encoder,
                                       max_iters=max_iters,
-                                      warm_up =warm_up,add_VAE_loss=add_VAE_loss)
+                                      warm_up =warm_up)
                                      
     if not test_only:
         checkpoint_dir  = os.path.join(logger.log_dir,"checkpoints")
@@ -404,84 +376,29 @@ def DL_single_run(x_train,y_train, model_name,latent_code_dim,batch_size,add_VAE
         survival_model.eval()
     return trainer,survival_model
 
-# def hypersearch_DL(x_data, y_data, model_name,method, nfolds, nevals, lrexp_range, wdexp_range, dro, 
-#                    alpha,batch_size=100,freeze_encoder=True,args=None,logger=None):
-#     labels = y_data[:,0]
-#     strata_labels = [list(zip(*g))[0]for _, g in it.groupby(enumerate(labels), op.itemgetter(1))]
-#     @optunity.cross_validated(x=x_data, y=y_data, num_folds=nfolds, num_iter=2, strata=strata_labels)
-#     def modelrun(x_train, y_train, x_test, y_test, wd):
-#                 ## tenrin to torch tensor dataset
-#         train_dataset = TensorDataset(torch.from_numpy(x_train).float(),torch.from_numpy(y_train).float())
-#         test_dataset = TensorDataset(torch.from_numpy(x_test).float(),torch.from_numpy(y_test).float())
-#         train_dataloader = DataLoader(train_dataset,
-#                                       batch_size = args.batch_size,
-#                                       num_workers=4,
-#                                       shuffle=True,
-#                                       drop_last=True)
-#         test_data_loader = DataLoader(test_dataset,batch_size=batch_size,shuffle=False, drop_last=False) # create your dataloader
-#         trainer,survival_model = DL_single_run(
-#                                 train_dataloader,
-#                                 model_name,
-#                                freeze_encoder=freeze_encoder,logger=logger,
-#                                alpha = alpha,wd=wd,dropout=dro,
-#                                disable_logging=True,enable_checkpointing=False,args=args)
-        
-#         survival_model.eval()
-#         trainer.test(survival_model,test_data_loader)
-#         ## get the c-index
-#         c_index = survival_model.c_index
-#         print ("c-index",c_index)
-#         del survival_model
-#         del trainer
-#         return c_index
-#     # box_constraints = {'lrexp': [-6, -3],'wdexp': [-6,0]}
-#     s = optunity.solvers.GridSearch(wd=[1e-2,1e-1,0,1,2])
 
-
-#     optimal_pars, searchlog= s.maximize(modelrun)
-    
-#     print('Optimal hyperparameters : ' + str(optimal_pars))
-#     # print('Cross-validated C after tuning: %1.3f' % searchlog.optimum)
-#     return optimal_pars, searchlog 
 def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
 
-def get_dataset(dataset_name, full_wave=False, unit="month"):
+def get_dataset(dataset_name,unit="month", ecg_max_length=608):
+    '''
+    dataset_name: str, the name of the dataset
+    unit: str, the unit of the duration, month, year, or day
+    return: 
+    x: input ecg wave signal data: shape (n_samples, n_leads, n_time_steps)
+    y: triplet vectors (n_sample, [status, duration, eid])
+    '''
     if dataset_name=="MI_with_HF_event":
-        if full_wave:
-            x = np.load("/Data/engs2522/ECG_data/MI_to_HF_survival_data/ecg_data_full_wave.npy")
-            time_steps = 1024
-        else: 
-            x = np.load("/Data/engs2522/ECG_data/MI_to_HF_survival_data/ecg_data.npy")
-            time_steps = 608
-        y = np.load("/Data/engs2522/ECG_data/MI_to_HF_survival_data/y_status_duration.npy")
-        # ## read the data from the numpy array
-        # stacked_ecg_data_list = np.load("/home/engs2522/project/multi-modal-heart/multi_modal_heart/tasks/survival_regression/data/batched_ecg_median_wave_MI_with_HF_event.npy")
-        # eid_list = np.load("/home/engs2522/project/multi-modal-heart/multi_modal_heart/tasks/survival_regression/data/e_id_list_MI_with_HF_event.npy")
-        # eid_status_duration_df = pd.read_csv("/home/engs2522/project/multi-modal-heart/multi_modal_heart/toolkits/ukb/non_imaging_information/MI/MI_HF_coxreg_df.csv")
-        # ## sort the data by the eid
-        # status_list = []
-        # duration_list = []
-        # for eid in eid_list:
-        #     print(eid)
-        #     status_list.append(int(eid_status_duration_df[eid_status_duration_df["eid"]==eid]["HF_status"].values[0]))
-        #     duration_list.append(int(eid_status_duration_df[eid_status_duration_df["eid"]==eid]["time_to_HF"].values[0]))
-        # ## ECG data preprocessing
-        # assert len(stacked_ecg_data_list)==len(status_list)==len(duration_list)==len(eid_list)
-        #    ## concatentate the status and duration and eid to the y
-        # y = np.stack([status_list,duration_list,eid_list],axis=-1)
+        x = np.load("./data/ukb/MI_to_HF_survival_data/ecg_data.npy")
+        y = np.load("./data/ukb/MI_to_HF_survival_data/y_status_duration.npy")
+        
 
     elif dataset_name=="HYP_with_HF_event":
-        if full_wave:
-            x = np.load("/Data/engs2522/ECG_data/HYP_to_HF_survival_data/ecg_data_full_wave.npy")
-            time_steps = 1024
-        else: 
-            x = np.load("/Data/engs2522/ECG_data/HYP_to_HF_survival_data/ecg_data.npy")
-            time_steps = 608
-        y = np.load("/Data/engs2522/ECG_data/HYP_to_HF_survival_data/y_status_duration.npy")
+        x = np.load("./data/ukb/HYP_to_HF_survival_data/ecg_data.npy")
+        y = np.load("./data/ukb/HYP_to_HF_survival_data/y_status_duration.npy")
         ## for duration, change it months
        
     else:
@@ -490,7 +407,8 @@ def get_dataset(dataset_name, full_wave=False, unit="month"):
     ## normalize the data
     x = zscore(x,axis=-1)
     x = np.nan_to_num(x)
-    pad_num = (time_steps-x.shape[-1])//2
+    assert ecg_max_length>=x.shape[-1], "the maximum length of the ecg signal should be larger than the input signal, but got {} and {}".format(ecg_max_length,x.shape[-1])
+    pad_num = (ecg_max_length-x.shape[-1])//2
     x = np.pad(x,((0,0),(0,0),(pad_num,pad_num)),"constant",constant_values=0)
     if unit == "month":
         y[:,1] = y[:,1]/30.0
@@ -505,187 +423,44 @@ def get_dataset(dataset_name, full_wave=False, unit="month"):
     print("status, duration, eid", y.shape)
     return x,y
 
-def get_model(model_name, train_from_scratch=False, freeze_encoder=False,time_steps=608, latent_code_dim=512):
-        if model_name=="resnet1d101_pretrained_recon" or model_name=="resnet1d101":
+def get_model(model_name, checkpoint_path="",train_from_scratch=False, freeze_encoder=False,time_steps=608, latent_code_dim=512):
+       
+        if model_name==f"ECG_attention":
+             ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
+                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
+                                    use_attention_pool=False,
+                                no_linear_in_E=True, apply_lead_mask=False, no_lead_attention=False,no_time_attention=False,apply_batchwise_dropout=True)        
+  
+        ## ablation study model: 
+        elif model_name ==f"ECG_attention_no_lead_attention":
+            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
+                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
+                                    use_attention_pool=False,
+                                no_linear_in_E=True, apply_lead_mask=False, 
+                                no_lead_attention=True,no_time_attention=False,apply_batchwise_dropout=True)
+        elif model_name ==f"ECG_attention_no_time_attention":
+            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
+                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
+                                    use_attention_pool=False,
+                                no_linear_in_E=True, apply_lead_mask=False, 
+                                no_lead_attention=False,no_time_attention=True,apply_batchwise_dropout=True)
+
+        elif model_name ==f"ECG_attention_no_lead_time_attention":
+            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
+                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
+                                    use_attention_pool=False,
+                                no_linear_in_E=True, apply_lead_mask=False, 
+                                no_lead_attention=True,no_time_attention=True,apply_batchwise_dropout=True)
+        ## baseline models
+        elif model_name.startswith("Marcel"):
+            ecg_net = ECGMarcelVAE(num_leads=12,time_steps=time_steps,z_dims=latent_code_dim) ## for ease of comparison
+        elif model_name.startswith("resnet1d101"):
             ecg_net = ECGAE(encoder_type="resnet1d101",in_channels=12,ECG_length=time_steps,decoder_type="attention_decoder",
                 embedding_dim=latent_code_dim//2,latent_code_dim=latent_code_dim,
                 add_time=False,
                 encoder_mha = False,
                 apply_method="",
                 decoder_outdim=12,apply_batchwise_dropout=True)
-            checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/resnet1d101_{latent_code_dim}+benchmark_classifier_attention_decoder/checkpoints/checkpoint_best_loss.ckpt"
-
-        elif model_name =="resnet1d101_pretrained_recon_classification":
-            ecg_net = ECGAE(encoder_type="resnet1d101",in_channels=12,ECG_length=time_steps,decoder_type="attention_decoder",
-                    embedding_dim=latent_code_dim//2,latent_code_dim=latent_code_dim,
-                    add_time=False,
-                    encoder_mha = False,
-                    apply_method="",
-                    decoder_outdim=12,apply_batchwise_dropout=True)
-            checkpoint_path =f"/home/engs2522/project/multi-modal-heart/log_median/resnet1d101_{latent_code_dim}+benchmark_classifier_attention_decoder_recon_classification/checkpoints/checkpoint_best_loss.ckpt"
-   
-
-        elif model_name==f"resnet1d101_pretrained_recon+ECG2Text" or  model_name==f"resnet1d101_pretrained_recon+ECG2RawText":
-            # ecg_net= ECGAE(encoder_type="resnet1d101",in_channels=12,ECG_length=time_steps,decoder_type="ms_resnet",
-            #                 embedding_dim=256,latent_code_dim=512,
-            #                 add_time=False,
-            #                 encoder_mha = False,
-            #                 apply_method="",
-            #                 decoder_outdim=12)
-            # checkpoint_path = "./log_median/resnet1d101_512+benchmark_classifier_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss-v2.ckpt"
-            if model_name==f"resnet1d101_pretrained_recon+ECG2Text":
-                ecg_net = ECGAE(encoder_type="resnet1d101",in_channels=12,ECG_length=time_steps,decoder_type="attention_decoder",
-                    embedding_dim=latent_code_dim//2,latent_code_dim=latent_code_dim,
-                    add_time=False,
-                    encoder_mha = False,
-                    apply_method="",
-                    decoder_outdim=12,apply_batchwise_dropout=True)
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/resnet1d101_{latent_code_dim}+benchmark_classifier_attention_decoder_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-            else: 
-                ecg_net= ECGAE(encoder_type="resnet1d101",in_channels=12,ECG_length=time_steps,decoder_type="attention_decoder",
-                            embedding_dim=latent_code_dim//2,latent_code_dim=latent_code_dim,
-                            add_time=False,
-                            encoder_mha = False,
-                            apply_method="",
-                            decoder_outdim=12,apply_batchwise_dropout=True)
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/resnet1d101_{latent_code_dim}+benchmark_classifier_attention_decoder_ECG2RawText/checkpoints/checkpoint_best_loss.ckpt"
-
-        elif model_name==f"resnet1d101_pretrained_classification":
-            ecg_net= ECGAE(encoder_type="resnet1d101",in_channels=12,ECG_length=time_steps,decoder_type="ms_resnet",
-                            embedding_dim=latent_code_dim//2,latent_code_dim=latent_code_dim,
-                            add_time=False,
-                            encoder_mha = False,
-                            apply_method="",
-                            decoder_outdim=12,apply_batchwise_dropout=True)
-            # checkpoint_path = "/home/egs2522/project/multi-modal-heart/log_median_finetune/resnet1d101_512+benchmark_classifier_ms_resnet/checkpoints/checkpoint_best_loss.ckpt"
-            checkpoint_path  =f"/home/engs2522/project/multi-modal-heart/log_median_finetune/resnet1d101_{latent_code_dim}+benchmark_classifier_raw_ms_resnet/checkpoints/checkpoint_best_val_macro_auc.ckpt"
-
-        elif model_name==f"resnet1d101_pretrained_classification+ECG2Text":
-            
-            # checkpoint_path = "/home/engs2522/project/multi-modal-heart/log_median_finetune/resnet1d101_512+benchmark_classifier_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-            checkpoint_path  =f"/home/engs2522/project/multi-modal-heart/log_median_finetune/resnet1d101_{latent_code_dim}+benchmark_classifier_raw_ms_resnet_ECG2Text/checkpoints/checkpoint_best_val_macro_auc-v1.ckpt"
-            ecg_net= ECGAE(encoder_type="resnet1d101",in_channels=12,ECG_length=time_steps,decoder_type="ms_resnet",
-                        embedding_dim=latent_code_dim//2,latent_code_dim=latent_code_dim,
-                        add_time=False,
-                        encoder_mha = False,
-                        apply_method="",
-                        decoder_outdim=12,apply_batchwise_dropout=True)
-        
-        elif model_name==f"ECG_attention_pretrained_on_classification":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, downsample_factor=5, base_feature_dim=4,if_VAE=False,use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False,apply_batchwise_dropout=True)
-            checkpoint_path = f"./log_median_finetune/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet/checkpoints/checkpoint_best_val_macro_auc.ckpt"
-        
-        elif model_name==f"ECG_attention_pretrained_on_classification+ECG2Text":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, downsample_factor=5, base_feature_dim=4,if_VAE=False,use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False,apply_batchwise_dropout=True)
-            checkpoint_path = f"./log_median_finetune/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet_ECG2Text/checkpoints/checkpoint_best_val_macro_auc-v1.ckpt"
-
-        elif model_name==f"ECG_attention_pretrained_on_recon" or model_name ==f"ECG_attention":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
-                                    use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False, no_lead_attention=False,no_time_attention=False,apply_batchwise_dropout=True)
-            if latent_code_dim==64:
-                checkpoint_path =f"./log_median/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet/checkpoints/checkpoint_best_loss.ckpt"
-            else:
-                checkpoint_path =f"./log_median/ECG_attention_{latent_code_dim}_finetuned_no_attention_pool_no_linear_ms_resnet/checkpoints/checkpoint_best_loss-v2.ckpt"
-
-        elif model_name ==f"ECG_attention_downsample_3":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                    downsample_factor=3, base_feature_dim=4,if_VAE=False,
-                                    use_attention_pool=False,
-                                    upsample_factor=3,
-                                    no_linear_in_E=True, apply_lead_mask=False, no_lead_attention=False,no_time_attention=False,apply_batchwise_dropout=True)
-            checkpoint_path=""
-        elif model_name ==f"ECG_attention_no_lead_attention"  or  model_name ==f"ECG_attention_no_lead_attention_pretrained_on_recon_ECG2Text":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
-                                    use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False, 
-                                no_lead_attention=True,no_time_attention=False,apply_batchwise_dropout=True)
-            checkpoint_path=""
-            if model_name=="ECG_attention_no_lead_attention_pretrained_on_recon_ECG2Text":
-               checkpoint_path="/home/engs2522/project/multi-modal-heart/log_median/ECG_attention_512_raw_no_attention_pool_no_linear_abl_no_lead_attention_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-        elif model_name ==f"ECG_attention_no_time_attention" or  model_name ==f"ECG_attention_no_time_attention_pretrained_on_recon_ECG2Text":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
-                                    use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False, 
-                                no_lead_attention=False,no_time_attention=True,apply_batchwise_dropout=True)
-            checkpoint_path=""
-            if model_name=="ECG_attention_no_time_attention_pretrained_on_recon_ECG2Text":
-               checkpoint_path="/home/engs2522/project/multi-modal-heart/log_median/ECG_attention_512_raw_no_attention_pool_no_linear_abl_no_time_attention_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-        
-        elif model_name ==f"ECG_attention_no_lead_time_attention" or  model_name ==f"ECG_attention_no_lead_time_attention_pretrained_on_recon_ECG2Text":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
-                                    use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False, 
-                                no_lead_attention=True,no_time_attention=True,apply_batchwise_dropout=True)
-            checkpoint_path=""
-            if model_name=="ECG_attention_no_lead_time_attention_pretrained_on_recon_ECG2Text":
-               checkpoint_path="/home/engs2522/project/multi-modal-heart/log_median/ECG_attention_512_raw_no_attention_pool_no_linear_abl_no_lead_time_attention_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-        elif model_name==f"ECG_attention_pretrained_on_recon_ECG2Text" or model_name=="ECG_attention_pretrained_on_recon_ECG2RawText":
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
-                                    use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False, no_lead_attention=False,no_time_attention=False,apply_batchwise_dropout=True)
-            if  "ECG_attention_pretrained_on_recon_ECG2RawText"==model_name:
-                if latent_code_dim==64:
-                    checkpoint_path = f"./log_median/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-                else:
-                    checkpoint_path = f"./log_median/ECG_attention_{latent_code_dim}_finetuned_no_attention_pool_no_linear_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss-v5.ckpt"
-        
-            else: 
-                if latent_code_dim==64:
-                    checkpoint_path =f"./log_median/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-                else:
-                    checkpoint_path =f"./log_median/ECG_attention_{latent_code_dim}_finetuned_no_attention_pool_no_linear_ms_resnet_ECG2Text/checkpoints/checkpoint_best_loss-v2.ckpt"
-        
-        elif model_name==f"ECG_attention_pretrained_on_recon_ECG2Text_fixed_text_encoder" or model_name=="ECG_attention_pretrained_on_recon_ECG2RawText_fixed_text_encoder":
-            
-            ecg_net  = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                    downsample_factor=5, base_feature_dim=4,if_VAE=False,
-                                    use_attention_pool=False,
-                                no_linear_in_E=True, apply_lead_mask=False, no_lead_attention=False,no_time_attention=False,apply_batchwise_dropout=True)
-            if model_name =="ECG_attention_pretrained_on_recon_ECG2Text_fixed_text_encoder":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet_ECG2Text_fixed_text_encoder/checkpoints/checkpoint_best_loss.ckpt"
-            elif model_name =="ECG_attention_pretrained_on_recon_ECG2RawText_fixed_text_encoder":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet_ECG2RawText_fixed_text_encoder/checkpoints/checkpoint_best_loss.ckpt"
-
-        elif model_name==f"ECG_attention_pretrained_on_recon_classification":
-            ecg_net = ECGAttentionAE(num_leads=12, time_steps=time_steps, z_dims=latent_code_dim, linear_out=latent_code_dim, 
-                                 downsample_factor=5, base_feature_dim=4,if_VAE=False,
-                                 use_attention_pool=False, no_lead_attention=False,
-                                 no_linear_in_E=True,apply_batchwise_dropout=True,
-                                 )
-            if latent_code_dim==64:
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_ms_resnet_recon_classification/checkpoints/checkpoint_best_loss.ckpt"
-            else:
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/ECG_attention_{latent_code_dim}_raw_no_attention_pool_no_linear_attention_decoder_recon_classification/checkpoints/checkpoint_best_loss-v3.ckpt"
-        elif model_name.startswith("Marcel"):
-            ecg_net = ECGMarcelVAE(num_leads=12,time_steps=time_steps,z_dims=latent_code_dim) ## for ease of comparison
-            if model_name =="Marcel_pretrained_recon":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/marcelVAE_{latent_code_dim}_attention_decoder/checkpoints/checkpoint_best_loss.ckpt"
-            elif model_name=="Marcel_pretrained_on_recon+ECG2RawText":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/marcelVAE_{latent_code_dim}_attention_decoder_ECG2RawText/checkpoints/checkpoint_best_loss.ckpt"
-            elif model_name =="Marcel_pretrained_on_recon+ECG2Text":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/marcelVAE_{latent_code_dim}_attention_decoder_ECG2Text/checkpoints/checkpoint_best_loss.ckpt"
-            elif model_name =="Marcel_pretrained_on_recon_classification":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/marcelVAE_{latent_code_dim}_attention_decoder_recon_classification/checkpoints/checkpoint_best_loss.ckpt"
-            else:
-                checkpoint_path = ""
-        elif model_name.startswith("AE"):
-            ecg_net = ECGMarcelVAE(num_leads=12,time_steps=time_steps,z_dims=latent_code_dim) ## for ease of comparison
-            if model_name =="AE_pretrained_recon_disable_VAE_loss":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/marcelVAE_{latent_code_dim}_attention_decoder_disable_VAE_loss/checkpoints/checkpoint_best_loss.ckpt"
-            elif model_name =="AE_pretrained_on_recon+ECG2Text_disable_VAE_loss":
-                checkpoint_path = f"/home/engs2522/project/multi-modal-heart/log_median/marcelVAE_{latent_code_dim}_attention_decoder_ECG2Text_disable_VAE_loss/checkpoints/checkpoint_best_loss.ckpt"
-            else:
-                checkpoint_path = ""
-
-   
         else:
             print(f"{model_name} failed to load")
             raise NotImplementedError
@@ -697,6 +472,7 @@ def get_model(model_name, train_from_scratch=False, freeze_encoder=False,time_st
         encoder = ecg_net.encoder
         decoder = ecg_net.decoder
         if not train_from_scratch:
+            assert os.path.exists(checkpoint_path), f'the checkpoint path {checkpoint_path} does not exist'
             checkpoint = torch.load(checkpoint_path)["state_dict"]
             try:
                 encoder_params = {(".").join(key.split(".")[2:]):value for key, value in checkpoint.items() if str(key).startswith("network.encoder")}
@@ -717,16 +493,16 @@ def get_model(model_name, train_from_scratch=False, freeze_encoder=False,time_st
 
 if __name__ == "__main__":
 
-    ## args set up
+    ## args input
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_name",type=str,default="MI_with_HF_event")
-    parser.add_argument("--full_wave", action="store_true",help="whether to use full wave data or not")
-    parser.add_argument("--model_name",type=str,default="resnet1d101_512_pretrained_recon")
+    parser.add_argument("--unit",type=str,choices=["month","year","day"],default="month", help="the unit of the duration")
+    parser.add_argument("--model_name",type=str,default="ECG_attention")
+    parser.add_argument("--checkpoint_path",type=str,default="./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt")
     parser.add_argument("--latent_code_dim",type=int,default=512)
-    parser.add_argument("--train_from_scratch",action="store_true")
+    parser.add_argument("--train_from_scratch",action="store_true",default=False,help="whether to train the model from scratch")
     parser.add_argument("--freeze_encoder",action="store_true")
     parser.add_argument("--warm_up",action="store_true",help="whether to use warm up scheduler")
-    parser.add_argument("--add_VAE_loss",action="store_true",help="whether to use VAE loss")
 
     ## seed
     parser.add_argument("--search_hyperparam",action="store_true")
@@ -737,30 +513,31 @@ if __name__ == "__main__":
     parser.add_argument("--dropout",type=float,default=0.5)
     parser.add_argument("--batch_size",type=int,default=1024)
     parser.add_argument("--n_folds",type=int,default=5)
-    parser.add_argument("--unit",type=str,choices=["month","year","day"],default="month")
     ## for test only
     parser.add_argument("--test_only",action="store_true")
     parser.add_argument("--test_checkpoint_path",type=str,default="")
+    ## output set up
+    parser.add_argument("--output_dir",type=str,default="./result")
+    parser.add_argument("--save_folder_name",type=str,default="test")
 
     args = parser.parse_args()
     # print(args)
     ## get the data, x is the ecg data N*num_leads*time_steps y consists of the status and duration information, N*2
-    x, y = get_dataset(args.dataset_name,full_wave=args.full_wave,unit=args.unit)
+    x, y = get_dataset(args.dataset_name,unit=args.unit)
     # model_name = "resnet1d101_512_pretrained_recon+ECG2Text"
     #make dir
     model_name = args.model_name
+    checkpoint_path = args.checkpoint_path
     latent_code_dim  = args.latent_code_dim
-    root_dir ="/Data/engs2522/ECGresult"
-    if args.add_VAE_loss:
-        model_dir = f"{root_dir}/train_survival_net_{args.dataset_name}_{str(args.alpha)}/{model_name}_{latent_code_dim}_w_VAE_loss"
-    else:
-        model_dir = f"{root_dir}/train_survival_net_{args.dataset_name}_{str(args.alpha)}/{model_name}_{latent_code_dim}"
+    output_dir ="./result"
+    save_folder_name = args.save_folder_name
+    model_dir = f"{output_dir}/train_survival_net_{args.dataset_name}_{str(args.alpha)}/{model_name}_{latent_code_dim}/{save_folder_name}"
+    log_dir = f"{output_dir}/train_survival_net_{args.dataset_name}_{str(args.alpha)}/{model_name}_{latent_code_dim}/{save_folder_name}/log"
+
     if not os.path.exists(model_dir):
         os.makedirs(model_dir)
 
     def run_nested_cv(x,y, n_folds,random_seed,args):
-        # pl.seed_everything(random_seed)
-        ## shuffle the data (x,y) together
         kf = StratifiedKFold(n_splits=n_folds, shuffle=True, random_state=random_seed)
         # Initialize lists to store predictions
         val_c_index_list = []
@@ -772,42 +549,10 @@ if __name__ == "__main__":
             x_test, y_test = x[test_indices], y[test_indices]
             print("Step 1a")
             cval_dir = f"{model_dir}/{random_seed}/cval_{str(cval)}"
-            tb_logger = TensorBoardLogger(f"{root_dir}/train_survival_net_{args.dataset_name}_{str(args.alpha)}/{model_name}_{args.latent_code_dim}", name=f"{random_seed}/cval_{str(cval)}", version="") 
+            tb_logger = TensorBoardLogger(log_dir, name=f"{random_seed}/cval_{str(cval)}", version="") 
 
             if not os.path.exists(cval_dir):os.makedirs(cval_dir)
-            # if args.search_hyperparam:
-            #     opars, osummary = hypersearch_DL(x_data=x_train, y_data=y_train,model_name=model_name,
-            #                                 method='random search', nfolds=n_folds, nevals=50,
-            #                                 lrexp_range=[-6,-2], wdexp_range=[-7,-2], 
-            #                                 alpha=args.alpha,
-            #                                 dro =args.dropout,
-            #                                 batch_size=args.batch_size,freeze_encoder=args.freeze_encoder,args=args,logger=tb_logger)
-            
-            
-            #     alpha = args.alpha
-            #     # lr = 10**opars["lrexp"]
-            #     wd = opars["wd"]
-            #     dro =args.dropout
-            #     hyperparam_dict = {"alpha":alpha,"lr":lr,"wd":wd,"dro":dro}
-            #     pd.DataFrame(hyperparam_dict,index=[0]).to_csv(f"{cval_dir}/hyperparameters.csv")
-            # else:
-            #     alpha = args.alpha
-            #     lr = args.lr
-            #     wd = args.wd
-            #     dro = args.dropout
-            # (1b) using optimal hyperparameters, train a model and test its performance on the holdout validation set.
-            ## now train the whole dataset, retrain the model with the optimal parameters
-            # train_dataset = TensorDataset(torch.from_numpy(x_train).float(),torch.from_numpy(y_train).long())
-            # g = torch.Generator()
-            # g.manual_seed(random_seed)
-            # train_dataloader = DataLoader(train_dataset,
-            #                               batch_size = args.batch_size,
-            #                               num_workers=4,
-            #                               worker_init_fn=seed_worker,
-            #                               generator=g,
-            #                               shuffle=True,
-            #                               drop_last=True)
-            trainer,survival_model = DL_single_run(x_train, y_train,model_name=model_name,lr=args.lr,
+            trainer,survival_model = DL_single_run(x_train, y_train,model_name=model_name,checkpoint_path=checkpoint_path,lr=args.lr,
                                          alpha = args.alpha,
                                          wd=args.wd,
                                          batch_size=args.batch_size,
@@ -816,7 +561,7 @@ if __name__ == "__main__":
                                          logger = tb_logger,freeze_encoder=args.freeze_encoder,
                                          random_seed=random_seed,
                                          latent_code_dim=args.latent_code_dim,
-                                         warm_up=args.warm_up,add_VAE_loss = args.add_VAE_loss)
+                                         warm_up=args.warm_up)
             test_dataset = TensorDataset(torch.from_numpy(x_test).float(),torch.from_numpy(y_test).float())
             test_dataloader = DataLoader(test_dataset,batch_size=args.batch_size,shuffle=False, drop_last=False) # create your dataloader
             ## test the model back using the train dataloader
@@ -830,9 +575,6 @@ if __name__ == "__main__":
                 pd.DataFrame(test_summary).to_csv(f"{cval_dir}/test_summary_with_hyperparam_search.csv")
             else: pd.DataFrame(test_summary).to_csv(f"{cval_dir}/test_summary.csv")
 
-            # test_score = survival_model.test_score_list
-            # test_y_ground_truth = survival_model.y_status_list
-            # test_y_duration = survival_model.y_duration_list
             test_c_index = survival_model.c_index
             val_c_index_list.append(test_c_index)
 
