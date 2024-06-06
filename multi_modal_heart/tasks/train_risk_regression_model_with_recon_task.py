@@ -154,12 +154,25 @@ class LitSurvivalModel(pl.LightningModule):
     def __init__(self,encoder,input_dim,lr=1e-4,alpha = 0.5,
                  wd=1e-2,dropout=0.5,freeze_encoder=False, decoder=None,
                  max_iters=20000, warm_up=False):
+        """_summary_
+
+        Args:
+            encoder (_type_): nn.Module encoder for extracting latent code from the input signal/data
+            input_dim (_type_): latent feature dim of the downstream risk prediction model
+            lr (_type_, optional): learning rate. Defaults to 1e-4.
+            alpha (float, optional): weight to trade-off the loss between recon and risk prediction. Defaults to 0.5.
+            wd (_type_, optional): weight decay. Defaults to 1e-2.
+            dropout (float, optional): dropout rate in the last layer of risk prediction model. Defaults to 0.5.
+            freeze_encoder (bool, optional): whether to freeze the encoder during finetuning. Defaults to False.
+            decoder (_type_, optional): decoder for input reconstruction. Defaults to None, where there is no reconstruction task.
+            max_iters (int, optional): max iter of optimization. Defaults to 20000.
+            warm_up (bool, optional): whether to warm up at the beginning of training with increased lr. Defaults to False.
+        """
         super().__init__()
     
         self.save_hyperparameters(ignore=["encoder", "decoder","freeze_encoder"])
         self.encoder = encoder
         self.decoder = decoder
-        self.dropout_input = nn.Dropout(p=dropout)
         self.freeze_encoder = freeze_encoder
         self.lr_scheduler = None
         self.warm_up=warm_up
@@ -169,7 +182,7 @@ class LitSurvivalModel(pl.LightningModule):
             for param in self.encoder.parameters():
                 param.requires_grad = False
         #### add a branch for survival prediction regression
-        self.downsteam_net = BenchmarkClassifier(input_dim,hidden_size=3,output_size=1,batchwise_dropout=True)
+        self.downsteam_net = BenchmarkClassifier(input_dim,hidden_size=3,output_size=1,batchwise_dropout=True,dropout_rate=dropout)
 
         self.test_score_list = []
         self.y_status_list = []
@@ -271,6 +284,7 @@ class LitSurvivalModel(pl.LightningModule):
             self.c_index = c_index
     def on_test_epoch_start(self):
         self.reset()
+
     def on_validation_epoch_end(self):
         if (not len(self.validation_score_list)==0) and (not len(self.y_status_val_list)==0) and (not len(self.y_duration_val_list)==0):
             pred_score = torch.cat(self.validation_score_list,dim=0)
@@ -389,7 +403,7 @@ def get_dataset(dataset_name,unit="month", ecg_max_length=608):
     unit: str, the unit of the duration, month, year, or day
     return: 
     x: input ecg wave signal data: shape (n_samples, n_leads, n_time_steps)
-    y: triplet vectors (n_sample, [status, duration, eid])
+    y: triplet vectors (n_sample, [status[0/1], duration (days), eid])
     '''
     if dataset_name=="MI_with_HF_event":
         x = np.load("./data/ukb/MI_to_HF_survival_data/ecg_data.npy")
@@ -399,8 +413,17 @@ def get_dataset(dataset_name,unit="month", ecg_max_length=608):
     elif dataset_name=="HYP_with_HF_event":
         x = np.load("./data/ukb/HYP_to_HF_survival_data/ecg_data.npy")
         y = np.load("./data/ukb/HYP_to_HF_survival_data/y_status_duration.npy")
+    elif dataset_name=="dummy":
+        ## generate random data for testing
+        x = np.random.randn(800,12,ecg_max_length)
+
+        y = np.random.randn(800,3)
+        ## for status, change it to binary
+        y[:,0] = np.random.randint(0,2,800)
         ## for duration, change it months
-       
+        y[:,1] = np.random.randint(0,100,800)
+        ## for eid
+        y[:,2] = np.arange(800)       
     else:
         raise NotImplementedError
     assert x.shape[0]==y.shape[0], "the number of samples should be the same, but got {} and {}".format(x.shape[0],y.shape[0])
@@ -408,8 +431,9 @@ def get_dataset(dataset_name,unit="month", ecg_max_length=608):
     x = zscore(x,axis=-1)
     x = np.nan_to_num(x)
     assert ecg_max_length>=x.shape[-1], "the maximum length of the ecg signal should be larger than the input signal, but got {} and {}".format(ecg_max_length,x.shape[-1])
+
     pad_num = (ecg_max_length-x.shape[-1])//2
-    x = np.pad(x,((0,0),(0,0),(pad_num,pad_num)),"constant",constant_values=0)
+    if pad_num>0: x = np.pad(x,((0,0),(0,0),(pad_num,pad_num)),"constant",constant_values=0)
     if unit == "month":
         y[:,1] = y[:,1]/30.0
     elif unit == "year":
@@ -418,7 +442,7 @@ def get_dataset(dataset_name,unit="month", ecg_max_length=608):
         pass
     else: 
         raise NotImplementedError
-    y[:,1] = y[:,1]+1 ##avoid the duration to be 0
+    y[:,1] = y[:,1]+1 ##avoid the duration to be 0, note that adding a constant to the duration does not affect the c-index
     print("input ecg shape",x.shape)
     print("status, duration, eid", y.shape)
     return x,y
@@ -495,7 +519,7 @@ if __name__ == "__main__":
 
     ## args input
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_name",type=str,default="MI_with_HF_event")
+    parser.add_argument("--dataset_name",type=str,default="dummy", help="the name of the dataset identifier to be used for training the survival model")
     parser.add_argument("--unit",type=str,choices=["month","year","day"],default="month", help="the unit of the duration")
     parser.add_argument("--model_name",type=str,default="ECG_attention")
     parser.add_argument("--checkpoint_path",type=str,default="./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt")

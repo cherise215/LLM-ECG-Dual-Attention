@@ -88,8 +88,8 @@ class BenchmarkClassifier(nn.Module):
         layers.append(nn.BatchNorm1d(hidden_size))
         if hidden_size>100:
             if batchwise_dropout:
-                layers.append(BatchwiseDropout(p=0.5))
-            else: layers.append(nn.Dropout(0.5))
+                layers.append(BatchwiseDropout(p=dropout_rate))
+            else: layers.append(nn.Dropout(dropout_rate))
         else: layers.append(nn.Identity())
         layers.append(nn.Linear(hidden_size, output_size))
         if last_act is not None:
