@@ -32,7 +32,7 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
                              no_linear_in_E=True)
     ```
 - **Robust Risk Prediction**: Implemented `StratifiedBatchSampler` (see `/path/to/LLM-ECG-Dual-Attention/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py`) and replaced standard dropout with `BatchwiseDropout` for risk prediction tasks (see `multi_modal_heart/model/custom_layers/fixable_dropout/, function: BatchwiseDropout`) to stabilize training. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensure fair comparison between censored and uncensored subjects when calculating the risk prediction loss. 
-- **Large-langguage model guided structured text embedding from ECG report to deal with uncertainty and bilingual**
+- **Large-Language Model Guided Structured Text Embedding**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: `toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb`. 
 
 ## Project structure
 ├── data                    # Raw and processed data
