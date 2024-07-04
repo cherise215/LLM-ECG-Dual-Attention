@@ -39,19 +39,19 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
 
 
 ## Project structure
-- data # Raw and processed data
-    - ptxbl
-    - ukb
-- multi_modal_heart # Core code base
-    - model: for all networks, layers
-    - tasks: *main files for pretraining and finetuning* as well as visualization of attentions.
-    - ECG: code for ECG loading and pre-processing.
-    - common: common utils
-- pretrained_weights # Pretrained model weights
-- result # Results of the experiments with risk prediction models
-- toolkits # Toolkit scripts and utilities
+- `data`: Raw and processed data
+    - `ptxbl`
+    - `ukb`
+- `multi_modal_heart`:  Core code base
+    - `model`: for all networks, layers
+    - `tasks`: *main files for pretraining and finetuning* as well as visualization of attentions.
+    - `ECG`: code for ECG loading and pre-processing.
+    - `common`: common utils
+- `pretrained_weights`: Pretrained model weights
+- `result`: # Results of the experiments with risk prediction models
+- `toolkits`: Toolkit scripts and utilities
     - generate_ptb_scp_with_confidence_embeddings.ipynb # Example of a Jupyter notebook for LLM-based text embedding processing
-- requirements.txt # Python dependencies
+- `requirements.txt`: Python dependencies
 
 
 ## Set Up
