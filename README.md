@@ -1,6 +1,6 @@
 # LLM-ECG-Dual-Attention
 
-[IEEE trans. on Big Data, 2024] Large Language Model-informed ECG Dual Attention Network for Heart Failure Risk Prediction.
+[IEEE trans. on Big Data, 2024] [Large Language Model-informed ECG Dual Attention Network for Heart Failure Risk Prediction](https://arxiv.org/abs/2403.10581).
 
 If you find the code useful, please cite
 ```
@@ -19,23 +19,25 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
 ```
 
 ## Key Features
-- **ECG Dual Attention Network**: A novel, lightweight ECG dual attention framework that visualizes cross-lead and temporal attention simultaneously. Initialize an instance with:
-    ```python
-    from multi_modal_heart.model.ecg_net_attention import ECGAttentionAE
-    ecg_net = ECGAttentionAE(num_leads=n_leads, time_steps=max_seq_len, 
-                             z_dims=512, 
-                             linear_out=512, 
-                             downsample_factor=5, 
-                             base_feature_dim=4,
-                             if_VAE=False,
-                             use_attention_pool=False,
-                             no_linear_in_E=True)
-    ```
-    Example code for visualizing the attention maps can be found in jupyter notebooks: 
-    - [notebook](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)
-    - [pdf for online quick look](multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf) 
-- **Robust Risk Prediction**: We stabilize the training with optimized data loader based on [StratifiedBatchSampler](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py#L119). This ensures that each batch shares the similar distribution which is important due to the scarse of heart failure event.  We also replace standard dropout with [BatchwiseDropout](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/model/custom_layers/fixable_dropout.py#L77C7-L77C23) for risk prediction tasks. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensures a fair comparison between risk scores obtained using masked features from censored and uncensored subjects in a batch. 
-- **Large-Language Model Guided Structured Text Embedding**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: [toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb). 
+- [x] **Explainable ECG Dual Attention Network**: A novel, lightweight ECG dual attention framework that visualizes cross-lead and temporal attention simultaneously for explainable AI solution. 
+    ### Quick start: 
+    - Initialize an instance with:
+        ```python
+        from multi_modal_heart.model.ecg_net_attention import ECGAttentionAE
+        ecg_net = ECGAttentionAE(num_leads=n_leads, time_steps=max_seq_len, 
+                                z_dims=512, 
+                                linear_out=512, 
+                                downsample_factor=5, 
+                                base_feature_dim=4,
+                                if_VAE=False,
+                                use_attention_pool=False,
+                                no_linear_in_E=True)
+        ```
+    - More code on how to visualize the attention maps can be found in jupyter notebooks: 
+        - [notebook](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)
+        - [pdf for online quick look](multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf) 
+- [x] **Robust Risk Prediction**: We stabilize the training with optimized data loader based on [StratifiedBatchSampler](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py#L119). This ensures that each batch shares the similar distribution which is important due to the scarse of heart failure event.  We also replace standard dropout with [BatchwiseDropout](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/model/custom_layers/fixable_dropout.py#L77C7-L77C23) for risk prediction tasks. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensures a fair comparison between risk scores obtained using masked features from censored and uncensored subjects in a batch. 
+- [x] **Reliable Large-Language Model Guided Structured Text Embedding**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: [toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb). 
 
 
 ## Project structure
