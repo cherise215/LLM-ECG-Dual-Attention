@@ -36,7 +36,7 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
     - More code on how to visualize the attention maps can be found in jupyter notebooks: 
         - [notebook](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)
         - [pdf for online quick look](multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf) 
-- [x] **Robust Risk Prediction**: We stabilize the training with optimized data loader based on [StratifiedBatchSampler](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py#L119). This ensures that each batch shares the similar distribution which is important due to the scarse of heart failure event.  We also replace standard dropout with [BatchwiseDropout](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/model/custom_layers/fixable_dropout.py#L77C7-L77C23) for risk prediction tasks. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensures a fair comparison between risk scores obtained using masked features from censored and uncensored subjects in a batch. 
+- [x] **Robust Risk Prediction**: We stabilize the training with optimized data loader based on [StratifiedBatchSampler](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py#L119). This ensures that each batch shares the similar data distribution. This is important due to the scarse of heart failure event. Without this, some batches may have zero heart failure event, then there is no way to compute the harzard risk loss.  We also replace standard dropout with [BatchwiseDropout](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/model/custom_layers/fixable_dropout.py#L77C7-L77C23) for risk prediction tasks. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensures a fair comparison between risk scores obtained using masked features from censored and uncensored subjects in a batch. 
 - [x] **Reliable Large Language Model Guided Structured Text Embedding Generation**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: [toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb). 
 
 
@@ -88,13 +88,13 @@ Here are some basic steps to run the project:
 
     - Train from scratch (just without specifying the pretrained model path):
       `CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512`
-    0 
-    - In case you have access to our real-wolrd datasets (e.g., you are a member in our UK biobank application). Then you could have access to our processed data incl. patients w/ myocardial infarction (MI) and patients with hypertension (HYP).
+    
+    - In case you have access to our real-wolrd datasets (e.g., you are a member in our UK biobank application). Then you could have access to our processed data incl. patients w/ myocardial infarction (MI) and patients with hypertension (HYP). Below are some examples with suggested configurations.
         - For MI  (batch size=128, as the total number of dataset is only 800): 
         ``` 
         CUDA_VISIBLE_DEVICES=1 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "MI_with_HF_event" --batch_size 128 --lr 1e-4 --n_folds 2 --latent_code_dim 512 --checkpoint_path "./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt" 
         ```
-        - For HYP (batch size=1024, as this dataset is much bigger): 
+        - For HYP (batch size=1024, as this dataset is much bigger,e.g., 10000): 
         ``` 
         CUDA_VISIBLE_DEVICES=1 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "HYP_with_HF_event" --batch_size 1024 --lr 1e-4 --n_folds 2 --latent_code_dim 512 --checkpoint_path "./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt" 
         ```
