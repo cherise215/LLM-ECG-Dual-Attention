@@ -76,9 +76,9 @@ Here are some basic steps to run the project:
 ## Task 1: Pretraining 
 -  Pretraining of ECG dual attention network using PTB-XL data, see `multi_modal_heart/tasks/pretrain.py`
     - for LLM-informed pretraining,text embeddings for each patient's record is needed.
-    '''
-    CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/pretrain.py --ae_type "ECG_attention_512" --ECG2Text  --use_median_wave  --warm_up 
-    '''
+
+    `CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/pretrain.py --ae_type "ECG_attention_512" --ECG2Text  --use_median_wave  --warm_up`
+
 ## Task 2: Finetuning 
 - You can also directly run code for finetuning the risk prediction task using our pretrained models.
     - Pretrained model: the model checkpoint can be found at: [G-drive](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing). Please put it under `Path/to/LLM-ECG-Dual-Attention/pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt`
@@ -87,7 +87,7 @@ Here are some basic steps to run the project:
       `CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --checkpoint_path "./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt" --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512`
 
     - Train from scratch (just without specifying the pretrained model path):
-      `CUDA_VISIBLE_DEVICES=1 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512`
+      `CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512`
     0 
     - In case you have access to our real-wolrd datasets (e.g., you are a member in our UK biobank application). Then you could have access to our processed data incl. patients w/ myocardial infarction (MI) and patients with hypertension (HYP).
         - For MI  (batch size=128, as the total number of dataset is only 800): 
