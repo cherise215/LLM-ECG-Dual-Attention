@@ -31,20 +31,27 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
                              use_attention_pool=False,
                              no_linear_in_E=True)
     ```
+    Example code for visualizing the attention maps can be found in jupyter notebooks: 
+    - [notebook](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)
+    - [pdf for online quick look](multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf) 
 - **Robust Risk Prediction**: Implemented `StratifiedBatchSampler` (see `/path/to/LLM-ECG-Dual-Attention/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py`) and replaced standard dropout with `BatchwiseDropout` for risk prediction tasks (see `multi_modal_heart/model/custom_layers/fixable_dropout/, function: BatchwiseDropout`) to stabilize training. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensure fair comparison between censored and uncensored subjects when calculating the risk prediction loss. 
 - **Large-Language Model Guided Structured Text Embedding**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: `toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb`. 
 
+
 ## Project structure
-- ├── data # Raw and processed data
-- │   ├── ptxbl
-- │   └── ukb
-- ├── multi_modal_heart # Core code base
-- ├── pretrained_weights # Pretrained model weights
-- ├── result # Results of the experiments with risk prediction models
-- ├── toolkits # Toolkit scripts and utilities
-- │   └── generate_ptb_scp_with_confidence_embeddings.ipynb # Example of a Jupyter notebook for LLM-based text embedding processing
-- ├── README.md # Readme file
-- └── requirements.txt # Python dependencies
+- data # Raw and processed data
+    - ptxbl
+    - ukb
+- multi_modal_heart # Core code base
+    - model: for all networks, layers
+    - tasks: *main files for pretraining and finetuning* as well as visualization of attentions.
+    - ECG: code for ECG loading and pre-processing.
+    - common: common utils
+- pretrained_weights # Pretrained model weights
+- result # Results of the experiments with risk prediction models
+- toolkits # Toolkit scripts and utilities
+    - generate_ptb_scp_with_confidence_embeddings.ipynb # Example of a Jupyter notebook for LLM-based text embedding processing
+- requirements.txt # Python dependencies
 
 
 ## Set Up
