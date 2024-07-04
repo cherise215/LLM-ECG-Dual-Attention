@@ -34,21 +34,23 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
     Example code for visualizing the attention maps can be found in jupyter notebooks: 
     - [notebook](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)
     - [pdf for online quick look](multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf) 
-- **Robust Risk Prediction**: Implemented `StratifiedBatchSampler` (see `/path/to/LLM-ECG-Dual-Attention/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py`) and replaced standard dropout with `BatchwiseDropout` for risk prediction tasks (see `multi_modal_heart/model/custom_layers/fixable_dropout/, function: BatchwiseDropout`) to stabilize training. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensure fair comparison between censored and uncensored subjects when calculating the risk prediction loss. 
-- **Large-Language Model Guided Structured Text Embedding**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: `toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb`. 
+- **Robust Risk Prediction**: We stabilize the training with optimized data loader based on [StratifiedBatchSampler](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py#L119). This ensures that each batch shares the similar distribution which is important due to the scarse of heart failure event.  We also replace standard dropout with [BatchwiseDropout](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/model/custom_layers/fixable_dropout.py#L77C7-L77C23) for risk prediction tasks. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensures a fair comparison between risk scores obtained using masked features from censored and uncensored subjects in a batch. 
+- **Large-Language Model Guided Structured Text Embedding**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: [toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb). 
 
 
 ## Project structure
 - `data`: Raw and processed data
-    - `ptxbl`
-    - `ukb`
+    - `ptxbl`[Dowload](https://drive.google.com/file/d/1FkCoGAfMeg2dmOSBYDljW8mVp9Rli9W4/view?usp=sharing)
+    - `ukb` 
 - `multi_modal_heart`:  Core code base
     - `model`: for all networks, layers
     - `tasks`: *main files for pretraining and finetuning* as well as visualization of attentions.
     - `ECG`: code for ECG loading and pre-processing.
     - `common`: common utils
-- `pretrained_weights`: Pretrained model weights
-- `result`: # Results of the experiments with risk prediction models
+- `pretrained_weights`: Pretrained model weights.[Download](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing)
+    - `model`: folder for pretrained ECG network weights
+    -  `text_embeddings`:
+- `result`:  Results of the experiments with risk prediction models. Please email Chen with reasonable request. 
 - `toolkits`: Toolkit scripts and utilities
     - generate_ptb_scp_with_confidence_embeddings.ipynb # Example of a Jupyter notebook for LLM-based text embedding processing
 - `requirements.txt`: Python dependencies
@@ -58,16 +60,16 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
 - Git clone this project: 
 `git clone https://github.com/cherise215/LLM-ECG-Dual-Attention.git`
 - (optional) Create a fresh Python 3.9.x virtual environment. [guide](https://www.arch.jhu.edu/python-virtual-environments/)
-- Install PyTorch with CUDA support for GPU-enabled computation (in our settings, we use Pytorch 1.13.0, cuda version 12.2, Driver Version: 535.183.01, hardware: GTX TITAN X) [check official guide here](https://pytorch.org/)
+- Install PyTorch with CUDA support for GPU-enabled computation. [check official guide for pytorch installation here](https://pytorch.org/). In our settings, we use Pytorch 1.13.0, cuda version 12.2, Driver Version: 535.183.01, hardware: GTX TITAN X. 
 `pip3 install torch torchvision torchaudio`
 - Install other required python libraries with: 
  `pip install -r requirements.txt`
 
 ## Preparation:
 Here are some basic steps to run the project:
-- Data Preparation: Ensure that your data is put in the the appropriate directories under data/. For example, PTXBL data should be in `[project folder]/data/ptxbl` [Dowloand post-processed one via Google Drive](https://drive.google.com/file/d/1FkCoGAfMeg2dmOSBYDljW8mVp9Rli9W4/view?usp=sharing) or official websites [PTB-XL](https://physionet.org/content/ptb-xl/1.0.3/) and [PTB-XL+](https://physionet.org/content/ptb-xl-plus/1.0.1/) for median wave information. For UK biobank data, unfortunately, we cannot directly share the data due to the UK biobank's strict data sharing policy. 
+- Data Preparation: Ensure that your data is put in the the appropriate directories under data/. For example, PTXBL data should be in `[project folder]/data/ptxbl` [Dowload post-processed one via Google Drive](https://drive.google.com/file/d/1FkCoGAfMeg2dmOSBYDljW8mVp9Rli9W4/view?usp=sharing) or official websites [PTB-XL](https://physionet.org/content/ptb-xl/1.0.3/) for report information and [PTB-XL+](https://physionet.org/content/ptb-xl-plus/1.0.1/) for median wave information. For UK biobank data, unfortunately, we cannot directly share the data due to the UK biobank's strict data sharing policy. 
 
-- Download pretrained models and saved structured text embeddings using ClinicalBert for different patients in PTB-XL [link](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing). Please put it as `[project folder]/pretrained_weights`. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: `toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb`. 
+- Download pretrained models and saved structured text embeddings using ClinicalBert for all the patients with verified reports in PTB-XL [link](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing). Please put it as `[project folder]/pretrained_weights/`. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: `toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb`. 
 
 ## Task 1: Pretraining 
 -  Pretraining of ECG dual attention network using PTB-XL data, see `multi_modal_heart/tasks/pretrain.py`
