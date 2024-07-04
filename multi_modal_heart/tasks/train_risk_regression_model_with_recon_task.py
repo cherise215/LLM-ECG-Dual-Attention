@@ -9,6 +9,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import argparse
 import os
 import  random
+from pathlib import Path
 import sys
 import numpy as np
 from scipy.stats import zscore
@@ -317,7 +318,8 @@ class LitSurvivalModel(pl.LightningModule):
         super().optimizer_step(*args, **kwargs)
         if self.lr_scheduler is not None: self.lr_scheduler.step()  # Step per iteration
 
-def DL_single_run(x_train,y_train, model_name,checkpoint_path,latent_code_dim,batch_size,logger=None,train_from_scratch=False,freeze_encoder=True, lr=1e-3,alpha =0.5,wd=1e-5,dropout=0.5,max_epochs=50,enable_checkpointing=True,disable_logging=False,warm_up=False,random_seed=42, test_only=False, test_checkpoint_path=None):
+def DL_single_run(x_train,y_train, model_name,latent_code_dim,batch_size,checkpoint_path="",logger=None,train_from_scratch=False,freeze_encoder=True, lr=1e-3,alpha =0.5,wd=1e-5,dropout=0.5,max_epochs=50,enable_checkpointing=True,disable_logging=False,warm_up=False,random_seed=42, test_only=False, test_checkpoint_path=None):
+    
     ## split it into train and validation
     x_inner_train, x_val, y_innner_train, y_val = train_test_split(x_train, y_train, test_size=0.2, random_state=random_seed,stratify=y_train[:,0])
     train_dataset = TensorDataset(torch.from_numpy(x_inner_train).float(),torch.from_numpy(np.array(y_innner_train)).float())
@@ -397,7 +399,7 @@ def seed_worker(worker_id):
     random.seed(worker_seed)
 
 
-def get_dataset(dataset_name,unit="month", ecg_max_length=608):
+def get_dataset(dataset_name,unit="month", ecg_max_length=608, x_path=None,y_path=None):
     '''
     dataset_name: str, the name of the dataset
     unit: str, the unit of the duration, month, year, or day
@@ -405,27 +407,45 @@ def get_dataset(dataset_name,unit="month", ecg_max_length=608):
     x: input ecg wave signal data: shape (n_samples, n_leads, n_time_steps)
     y: triplet vectors (n_sample, [status[0/1], duration (days), eid])
     '''
-    if dataset_name=="MI_with_HF_event":
-        x = np.load("./data/ukb/MI_to_HF_survival_data/ecg_data.npy")
-        y = np.load("./data/ukb/MI_to_HF_survival_data/y_status_duration.npy")
-        
-
-    elif dataset_name=="HYP_with_HF_event":
-        x = np.load("./data/ukb/HYP_to_HF_survival_data/ecg_data.npy")
-        y = np.load("./data/ukb/HYP_to_HF_survival_data/y_status_duration.npy")
-    elif dataset_name=="dummy":
-        ## generate random data for testing
-        x = np.random.randn(800,12,ecg_max_length)
-
-        y = np.random.randn(800,3)
-        ## for status, change it to binary
-        y[:,0] = np.random.randint(0,2,800)
-        ## for duration, change it months
-        y[:,1] = np.random.randint(0,100,800)
-        ## for eid
-        y[:,2] = np.arange(800)       
+    # back to project root/
+    PROJECT_ROOT = Path(__file__).parents[2]
+    print (PROJECT_ROOT)
+    if x_path is not None and y_path is not None:
+        x = np.load(x_path)
+        y = np.load(y_path)
+        print("load signal and event data from the given path")
     else:
-        raise NotImplementedError
+        if dataset_name=="dummy":
+            ## generate random data for testing
+            x = np.random.randn(800,12,ecg_max_length)
+
+            y = np.random.randn(800,3)
+            ## for status, change it to binary
+            y[:,0] = np.random.randint(0,2,800)
+            ## for duration, change it months
+            y[:,1] = np.random.randint(0,100,800)
+            ## for eid
+            y[:,2] = np.arange(800)
+        else:
+            print("load signal and event data from default path")
+            if dataset_name=="MI_with_HF_event":
+                ## back to root 
+                ## load the data from the path `PROJECT_ROOT/data/ukb/MI_to_HF_survival_data/
+                print("load MI_with_HF_event")
+                x_path = os.path.join(PROJECT_ROOT,"data/ukb/MI_to_HF_survival_data/ecg_data.npy")
+                y_path = os.path.join(PROJECT_ROOT,"data/ukb/MI_to_HF_survival_data/y_status_duration.npy")   
+
+            elif dataset_name=="HYP_with_HF_event":
+                print("load HYP_with_HF_event")
+                x_path = os.path.join(PROJECT_ROOT,"data/ukb/HYP_to_HF_survival_data/ecg_data.npy")
+                y_path = os.path.join(PROJECT_ROOT,"data/ukb/HYP_to_HF_survival_data/y_status_duration.npy")
+            else:
+                raise NotImplementedError
+            assert os.path.exists(x_path), f"the x_path {x_path} does not exist"
+            assert os.path.exists(y_path), f"the y_path {y_path} does not exist"
+            print ("load x,y from the given path",x_path,y_path)
+            x = np.load(x_path)
+            y = np.load(y_path)
     assert x.shape[0]==y.shape[0], "the number of samples should be the same, but got {} and {}".format(x.shape[0],y.shape[0])
     ## normalize the data
     x = zscore(x,axis=-1)
@@ -553,7 +573,7 @@ if __name__ == "__main__":
     model_name = args.model_name
     checkpoint_path = args.checkpoint_path
     latent_code_dim  = args.latent_code_dim
-    output_dir ="./result"
+    output_dir =args.output_dir
     save_folder_name = args.save_folder_name
     model_dir = f"{output_dir}/train_survival_net_{args.dataset_name}_{str(args.alpha)}/{model_name}_{latent_code_dim}/{save_folder_name}"
     log_dir = f"{output_dir}/train_survival_net_{args.dataset_name}_{str(args.alpha)}/{model_name}_{latent_code_dim}/{save_folder_name}/log"
