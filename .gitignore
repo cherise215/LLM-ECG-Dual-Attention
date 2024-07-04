@@ -48,7 +48,7 @@ log_median_finetune/
 multi_modal_heart/tasks/finetune_on_HF/
 multi_modal_heart/tasks/finetune_on_MI/
 multi_modal_heart/tasks/survival_regression/
-multi_modal_heart/toolkits/template/
+multi_modal_heart/toolkits-private
 *.pkl
 *.log
 *.pth
@@ -145,7 +145,6 @@ output/
 log/
 cache/
 train_survival_net/
-toolkits/
 pretrained_weights/
 result/
 log_*/

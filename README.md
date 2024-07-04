@@ -35,19 +35,17 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
 - **Large-Language Model Guided Structured Text Embedding**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: `toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb`. 
 
 ## Project structure
-├── data                    # Raw and processed data
-│   ├── ptxbl
-│   ├── ukb
-├── multi_modal_heart       # core code base
-├── pretrained_weights      # Pretrained model weights
-├── result                  # Results of the experiments with risk prediction models.
-├── scripts                 # Shell and other scripts
-│   └── train.sh            # Training script
-├── toolkits                # Toolkit scripts and utilities
-│   └── ukb/assets
-│       └── generate_ptb_scp_with_confidence_embeddings.ipynb  # Example of a Jupyter notebook for LLM-based text embedding processing.
-├── README.md               # Readme file
-└── requirements.txt        # Python dependencies
+- ├── data # Raw and processed data
+- │   ├── ptxbl
+- │   └── ukb
+- ├── multi_modal_heart # Core code base
+- ├── pretrained_weights # Pretrained model weights
+- ├── result # Results of the experiments with risk prediction models
+- ├── toolkits # Toolkit scripts and utilities
+- │   └── generate_ptb_scp_with_confidence_embeddings.ipynb # Example of a Jupyter notebook for LLM-based text embedding processing
+- ├── README.md # Readme file
+- └── requirements.txt # Python dependencies
+
 
 ## Set Up
 - Git clone this project: 
