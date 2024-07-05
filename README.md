@@ -2,6 +2,8 @@
 
 [IEEE trans. on Big Data, 2024] [Large Language Model-informed ECG Dual Attention Network for Heart Failure Risk Prediction](https://arxiv.org/abs/2403.10581).
 
+
+
 If you find the code useful, please cite
 ```
 @ARTICLE{Chen2024-ea,
@@ -17,6 +19,16 @@ or
 ```
 Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informed ECG Dual Attention Network for Heart Failure Risk Prediction. IEEE. trans on Big Data. 2024. Available: http://arxiv.org/abs/2403.10581
 ```
+## Overview:
+Heart failure (HF) poses a significant public health challenge, with a rising global mortality rate. Early detection and prevention of HF could significantly reduce its impact. In this study, we introduce a novel methodology for predicting HF risk using 12-lead electrocardiograms (ECGs) with a focus on **robustness** and **explainability**. Specifically, we leverage a large language model (LLM) with a public ECG-report dataset for pretraining on an ECG-report alignment task.  Our LLM-informed pretraining can handle `labeling uncertainty` and `mixed languages in the dataset` while ensuring pathologically informed representation learning. See below and paper for more details. The network is then fine-tuned for HF risk prediction using two specific cohorts from the UK Biobank study: patients with hypertension (UKB-HYP) and those who have had a myocardial infarction (UKB-MI).
+<img align="center" src="assets/llm-informed_pretraining.png" width="750">
+
+
+ To enhance explainability, we present a novel, lightweight dual-attention ECG network featuring a cross-lead attention module and twelve lead-specific temporal attention modules, which can visualize cross-lead interactions and each lead's local dynamics. See below. 
+ <img align="center" src="assets/network.png" width="750">
+
+ The results reveal that LLM-informed pretraining substantially enhances HF risk prediction in these cohorts. The dual-attention design not only improves interpretability but also predictive accuracy, outperforming existing competitive methods with C-index scores of 0.6349 for UKB-HYP and 0.5805 for UKB-MI. This demonstrates our method's potential in advancing HF risk assessment using clinically complex ECG data.
+
 
 ## Key Features
 - [x] **Explainable ECG Dual Attention Network**: A novel, lightweight ECG dual attention framework that visualizes cross-lead and temporal attention simultaneously for explainable AI solution. 
@@ -37,7 +49,7 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
         - [multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)
         - [pdf for online quick look](multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf) 
 - [x] **Robust Risk Prediction**: We stabilize the training with optimized data loader based on [StratifiedBatchSampler](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py#L119). This ensures that each batch shares the similar data distribution. This is important due to the scarse of heart failure event. Without this, some batches may have zero heart failure event, then there is no way to compute the harzard risk loss.  We also replace standard dropout with [BatchwiseDropout](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/ad2560d0788e854e5fd4d964bcc3840290824671/multi_modal_heart/model/custom_layers/fixable_dropout.py#L77C7-L77C23) for risk prediction tasks. `BatchwiseDropout` applies the same feature masking to all subjects within a batch. In this way, it ensures a fair comparison between risk scores obtained using masked features from censored and uncensored subjects in a batch. 
-- [x] **Reliable Large Language Model Guided Structured Text Embedding Generation**: Utilizes large language models to generate structured text embeddings from ECG reports, effectively handling uncertainty and bilingual data. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: [toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb). 
+- [x] **Reliable Large Language Model Guided Structured Text Embedding Generation**: Utilizes large language models to generate structured text embeddings from ECG reports. To effectively handle uncertainty and bilingual data, we use unified ECG-SCP codes to construct SCP-code-based statements, including their categories and detailed definitions, as a way to inject medical knowledge. Each report may contain multiple codes (pathologies), and each code is associated with an uncertainty score. Therefore, for each report, we perform confidence-based reweighting to aggregate text embeddings with the associated different SCP codes. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: [toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb). 
 
 
 ## Project structure
@@ -123,11 +135,11 @@ For your own datasets, please organize it in the following format:
 
 
 ## Visualizations:
-- [multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)[due to large size, please download the PDF for quick online look](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf): Step-by-step tutorials on the visualization of the dual attention maps.
+- [`multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb`](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb) [(PDF)](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf): Step-by-step tutorials on the visualization of the dual attention maps.
 
 - [`multi_modal_heart/tasks/vis_risk_score_feature_distribution.ipynb`](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/multi_modal_heart/tasks/vis_risk_score_feature_distribution.pdf): Visualizes the last hidden layer's feature distribution between low-risk and high-risk groups.
 
-- [multi_modal_heart/tasks/vis_risk_score_and_survival_curves.ipynb](multi_modal_heart/tasks/vis_risk_score_and_survival_curves.ipynb): Visualizes the average risk scores with models from the above two-fold cross-validaton (fivetimes) and plot kaplan meier curve
+- [`multi_modal_heart/tasks/vis_risk_score_and_survival_curves.ipynb`](multi_modal_heart/tasks/vis_risk_score_and_survival_curves.ipynb): Visualizes the average risk scores with models from the above two-fold cross-validaton (fivetimes) and plot kaplan meier curve
 
 ## Contact
 For any questions or issues, please contact [Chen Chen] at [work.cherise@gmail.com]. Thank you for checking out our project!
