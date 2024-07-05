@@ -51,7 +51,7 @@ Chen C, Li L, Beetz M, Banerjee A, Gupta R, Grau V. Large Language Model-informe
     - `common`: common utils
 - `pretrained_weights`: Pretrained model weights.[Download](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing)
     - `model`: folder for pretrained ECG network weights
-    -  `text_embeddings`:
+    -  `text_embeddings`: folder contains text embeddings extracted from LLMs. 
 - `result`:  Results of the experiments with risk prediction models. Please email Chen with reasonable request. 
 - `toolkits`: Toolkit scripts and utilities
     - generate_ptb_scp_with_confidence_embeddings.ipynb # Example of a Jupyter notebook for LLM-based text embedding processing
@@ -74,30 +74,60 @@ Here are some basic steps to run the project:
 - Download pretrained models and saved structured text embeddings using ClinicalBert for all the patients with verified reports in PTB-XL [link](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing). Please put it as `[project folder]/pretrained_weights/`. For interested researchers, step-by-step tutorial on how we generate these embeddings can be found at: `toolkits/generate_ptb_scp_with_confidence_embeddings.ipynb`. 
 
 ## Task 1: Pretraining 
--  Pretraining of ECG dual attention network using PTB-XL data, see `multi_modal_heart/tasks/pretrain.py`
-    - for LLM-informed pretraining,text embeddings for each patient's record is needed.
+-  LLM_informed Pretraining of ECG dual attention network using PTB-XL data, see `multi_modal_heart/tasks/pretrain.py`. Please ensure that you have downloaded the weights [from G-drive](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing) and save it at: `path/to/LLM-ECG-Dual-Attention/pretrained_weights/text_embeddings/PTBXL_LLM_scp_structed_text_embedding.pkl` 
 
-    `CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/pretrain.py --ae_type "ECG_attention_512" --ECG2Text  --use_median_wave  --warm_up`
+To start training/finetuning, simply run: 
+    ```console
+    CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/pretrain.py --ae_type "ECG_attention_512" --ECG2Text  --use_median_wave  --warm_up
+    ```
 
-## Task 2: Finetuning 
-- You can also directly run code for finetuning the risk prediction task using our pretrained models.
-    - Pretrained model: the model checkpoint can be found at: [G-drive](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing). Please put it under `Path/to/LLM-ECG-Dual-Attention/pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt`
-    - Risk prediction data. Unfortunately, we are not allowed to share the UK biobank data. Here, we use a dummy data for users to test their environment. Please change the datasetname in those below commands  to `dummy`, e.g "--dataset_name 'dummy'" to turn it on. 
-    - Use a dummy dataset for testing:
-      `CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --checkpoint_path "./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt" --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512`
+## Task 2: Heart Failure Risk Prediction 
+- You can train the model using your own datasets or our datasets (note: while UK biobank is a public dataset, it has a strict data sharing policy. Users must apply to get access. We can only share the UK Biobank data to the collaborators within the same application. check [UK biobank access policy](https://www.ukbiobank.ac.uk/media/llupxihh/20210309-access-procedures-v2-0-final.pdf)). 
+For your own datasets, please organize it in the following format:
+    - x: input ECG data vectors (n_samples, n_leads, n_time_steps)
+    - y: a list of triplets (status, duration, eid). 
+        - **status [int]:** Event indicator tensor, indicating whether this is a heart failure event (1) or not (0).
+        - **time [int]:** Duration in days from the examination date (date of ECG) to the event time or, if there is no event, to the censoring time (date of the last database update).
+        - **eid [int]:** Patient unique id.
 
-    - Train from scratch (just without specifying the pretrained model path):
-      `CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512`
+- Robust evaluation: Due to limited of censored subjects in our case, the code will automatically perform the 2-fold cross-validation and repeat the whole training and evaluation process using different random seeds 5 times. 
+
+- Test environment using `dummy` data, by specifying the dataset_name to `dummy`, i.e., "--dataset_name 'dummy'":
+    - Train from scractch. Simply run:
+    ```console
+    CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512
+    ```
+    - Finetune the model using our LLM-pretrained model. The model checkpoint can be found at [G-drive](https://drive.google.com/drive/folders/1j6qbuQYjJJ4yn_zz4aHZdQRrvuFUJ7pS?usp=sharing).You can also use your own one by specifying `checkpoint_path`. 
+    - Run the command:
+      ```console
+      CUDA_VISIBLE_DEVICES=0 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --checkpoint_path "./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt" --dataset_name "dummy"  --batch_size 128  --lr 1e-4 --n_folds 2 --latent_code_dim 512`
+      Here the pretrained weights is located at: `Path/to/LLM-ECG-Dual-Attention/pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt
+      ```
     
-    - In case you have access to our real-wolrd datasets (e.g., you are a member in our UK biobank application). Then you could have access to our processed data incl. patients w/ myocardial infarction (MI) and patients with hypertension (HYP). Below are some examples with suggested configurations.
-        - For MI  (batch size=128, as the total number of dataset is only 800): 
-        ``` 
+- Train the model with real-world datasets. Below are examples with suggested batch size configurations for reference:
+      - **Small datasets:**
+      For small datasets, please ensure that the batch size contains a sufficient number of censored subjects and use small batches for better model regularization. In our myocardial infarction (MI) cohort, we set the `batch_size` to 128 (`--batch_size 128`) as the total number of samples is only 800:
+  
+        ```console
         CUDA_VISIBLE_DEVICES=1 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "MI_with_HF_event" --batch_size 128 --lr 1e-4 --n_folds 2 --latent_code_dim 512 --checkpoint_path "./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt" 
         ```
-        - For HYP (batch size=1024, as this dataset is much bigger,e.g., 10000): 
-        ``` 
+        
+    - **Larger datasets:**
+         For larger datasets, you can consider to increase the batch size. In our hypertension dataset, we set `batch_size` to 1024:
+
+        ``` console
         CUDA_VISIBLE_DEVICES=1 python multi_modal_heart/tasks/train_risk_regression_model_with_recon_task.py --model_name "ECG_attention" --train_from_scratch --dataset_name "HYP_with_HF_event" --batch_size 1024 --lr 1e-4 --n_folds 2 --latent_code_dim 512 --checkpoint_path "./pretrained_weights/model/ECG2Text/checkpoint_best_loss-v2.ckpt" 
         ```
+## Traditional risk prediction based on Cox’s proportional hazard model using 15 ECG biomarkers/measurements:
+- We also provide code to train a Cox’s proportional hazard model using 15 clinically identified ECG measurements/biomarkers:. Check [multi_modal_heart/tasks/survival_cox_reg_model_with_biomarkers.ipynb](multi_modal_heart/tasks/survival_cox_reg_model_with_biomarkers.ipynb)
+
+
+## Visualizations:
+- [multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb](multi_modal_heart/tasks/vis_risk_score_attention_maps.ipynb)[due to large size, please download the PDF for quick online look](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/multi_modal_heart/tasks/vis_risk_score_attention_maps.pdf): Step-by-step tutorials on the visualization of the dual attention maps.
+
+- [`multi_modal_heart/tasks/vis_risk_score_feature_distribution.ipynb`](https://github.com/cherise215/LLM-ECG-Dual-Attention/blob/dev/multi_modal_heart/tasks/vis_risk_score_feature_distribution.pdf): Visualizes the last hidden layer's feature distribution between low-risk and high-risk groups.
+
+- [multi_modal_heart/tasks/vis_risk_score_and_survival_curves.ipynb](multi_modal_heart/tasks/vis_risk_score_and_survival_curves.ipynb): Visualizes the average risk scores with models from the above two-fold cross-validaton (fivetimes) and plot kaplan meier curve
 
 ## Contact
 For any questions or issues, please contact [Chen Chen] at [work.cherise@gmail.com]. Thank you for checking out our project!
